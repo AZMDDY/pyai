@@ -6,6 +6,7 @@ from enum import Enum
 import numpy as np
 import collections
 import torch
+import torch.nn as nn
 import torch.nn.functional as F
 import unittest
 
@@ -71,34 +72,63 @@ class TestReplayBuffer(unittest.TestCase):
 class Qnet(torch.nn.Module):
     """ 只有一层隐藏层的Q网络 """
 
-    def __init__(self, state_dim, hidden_dim, action_dim):
+    def __init__(self, input_shape, hidden_dim, action_dim):
+        """
+        :param input_shape: 状态空间
+        :param hidden_dim: 隐藏层的维度
+        :param action_dim: 动作空间的维度
+        """
         super(Qnet, self).__init__()
-        # 输入层 -> 隐藏层
-        self.fc1 = torch.nn.Linear(state_dim, hidden_dim)
-        # self.fc2 = torch.nn.Linear(hidden_dim, hidden_dim)
-        # 隐藏层 -> 输出层
-        self.fc3 = torch.nn.Linear(hidden_dim, action_dim)
+        self.input_shape = input_shape
+        c, h, w = self.input_shape
+        # 卷积层
+        self.conv1 = nn.Conv2d(c, 32, kernel_size=3, stride=1, padding=1)
+        self.conv2 = nn.Conv2d(32, 64, kernel_size=3, stride=1, padding=1)
+
+        # 全连接层
+        self.fc1 = torch.nn.Linear(64 * h * w, hidden_dim)
+        self.fc2 = torch.nn.Linear(hidden_dim, action_dim)
 
     def forward(self, x):
+        # 前向传播
+        # 卷积层 + ReLU + 池化
+        x = F.relu(self.conv1(x))
+        # x = F.max_pool2d(x, 2)  # 池化层，减少特征图大小
+        x = F.relu(self.conv2(x))
+        # x = F.max_pool2d(x, 2)  # 池化层，进一步减少特征图大小
+        # 展平特征图以适应全连接层
+        x = x.view(x.size(0), -1)  # 展平操作
+        # 全连接层 + ReLU
         x = F.relu(self.fc1(x))
-        # x = F.relu(self.fc2(x))
-        return self.fc3(x)
+        # 输出层
+        x = self.fc2(x)
+        return x
 
 
 class VAnet(torch.nn.Module):
     """ 只有一层隐藏层的A网络和V网络 """
 
-    def __init__(self, state_dim, hidden_dim, action_dim):
+    def __init__(self, input_shape, hidden_dim, action_dim):
         super(VAnet, self).__init__()
-        self.fc1 = torch.nn.Linear(state_dim, hidden_dim)  # 共享网络部分
-        # self.fc2 = torch.nn.Linear(hidden_dim, hidden_dim)
-
+        self.input_shape = input_shape
+        c, h, w = self.input_shape
+        # 卷积层
+        self.conv1 = nn.Conv2d(c, 32, kernel_size=3, stride=1)
+        self.conv2 = nn.Conv2d(32, 64, kernel_size=3, stride=1)
+        # 池化层
+        self.pool = nn.MaxPool2d(2, 2)
+        # 全连接层
+        self.fc1 = torch.nn.Linear(64 * h * w, hidden_dim)
         self.fc_A = torch.nn.Linear(hidden_dim, action_dim)
         self.fc_V = torch.nn.Linear(hidden_dim, 1)
 
     def forward(self, x):
-        x = F.relu(self.fc1(x))
-        # x = F.relu(self.fc2(x))
+        # 前向传播
+        x = self.pool(torch.relu(self.conv1(x)))
+        x = self.pool(torch.relu(self.conv2(x)))
+        _, h, w = self.input_shape
+        x = x.view(-1, 64 * h * w)  # 展平
+        x = torch.relu(self.fc1(x))
         A = self.fc_A(x)
         V = self.fc_V(x)
         Q = V + A - A.mean(1).view(-1, 1)  # Q值由V值和A值计算得到
@@ -114,11 +144,11 @@ class DqnType(Enum):
 class DQN:
     """ DQN算法 """
 
-    def __init__(self, state_dim, hidden_dim, action_dim, learning_rate, gamma, epsilon, epsilon_decay, target_update,
+    def __init__(self, input_shape, hidden_dim, action_dim, learning_rate, gamma, epsilon, epsilon_decay, target_update,
                  device, dqn_type=DqnType.VANILLA_DQN, is_eval=False):
         """
         初始化qdn网络
-        :param state_dim: 输入层-状态空间 维度
+        :param input_shape: 输入层-状态空间
         :param hidden_dim: 隐藏层 维度
         :param action_dim: 输出层-动作空间 维度(表示有几个动作)
         :param learning_rate: 学习率
@@ -133,11 +163,11 @@ class DQN:
         self.action_dim = action_dim
         if not is_eval:
             if dqn_type == DqnType.DUELING_DQN:  # Dueling DQN采取不一样的网络框架
-                self.q_net = VAnet(state_dim, hidden_dim, self.action_dim).to(device)
-                self.target_q_net = VAnet(state_dim, hidden_dim, self.action_dim).to(device)
+                self.q_net = VAnet(input_shape, hidden_dim, self.action_dim).to(device)
+                self.target_q_net = VAnet(input_shape, hidden_dim, self.action_dim).to(device)
             else:
-                self.q_net = Qnet(state_dim, hidden_dim, self.action_dim).to(device)
-                self.target_q_net = Qnet(state_dim, hidden_dim, self.action_dim).to(device)
+                self.q_net = Qnet(input_shape, hidden_dim, self.action_dim).to(device)
+                self.target_q_net = Qnet(input_shape, hidden_dim, self.action_dim).to(device)
             # 使用Adam优化器
             self.optimizer = torch.optim.Adam(self.q_net.parameters(), lr=learning_rate)
         else:
@@ -156,15 +186,17 @@ class DQN:
             # 随机探索
             action = np.random.randint(self.action_dim)
         else:
-            state = torch.tensor([state], dtype=torch.float).to(self.device)
+            # 增加一个批次的维度
+            state = torch.tensor(state, dtype=torch.float).unsqueeze(0).to(self.device)
             action = self.q_net(state).argmax().item()
         return action
 
     def update(self, transition_dict):
-        states = torch.tensor(transition_dict['states'], dtype=torch.float).to(self.device)
+        states = torch.tensor(np.array(transition_dict['states']), dtype=torch.float).to(self.device)
+        # logging.error(states.shape)
         actions = torch.tensor(transition_dict['actions']).view(-1, 1).to(self.device)
         rewards = torch.tensor(transition_dict['rewards'], dtype=torch.float).view(-1, 1).to(self.device)
-        next_states = torch.tensor(transition_dict['next_states'], dtype=torch.float).to(self.device)
+        next_states = torch.tensor(np.array(transition_dict['next_states']), dtype=torch.float).to(self.device)
         dones = torch.tensor(transition_dict['dones'], dtype=torch.float).view(-1, 1).to(self.device)
 
         q_values = self.q_net(states).gather(1, actions)  # Q值
@@ -203,10 +235,15 @@ class SysEnv:
         self.grid_height = grid_height
         self.state = (0, 0)
         self.goal = (grid_width - 1, grid_height - 1)
+        self.mapinfo = np.zeros((self.grid_width, self.grid_height, 2))
+        self.fill_static_map_info()
 
     def reset(self):
         self.state = (0, 0)
-        return self.state
+        self.mapinfo = np.zeros((self.grid_width, self.grid_height, 2))
+        self.mapinfo[self.state[0]][self.state[1]][0] = 1
+        self.fill_static_map_info()
+        return np.transpose(self.mapinfo, (2, 0, 1))
 
     def step(self, action):
         x, y = self.state
@@ -221,15 +258,66 @@ class SysEnv:
         old_state = self.state
         self.state = (x, y)
         reward = -1
+        # 碰壁
         if old_state == self.state:
             reward += -50
+        # 撞墙
+        if self.mapinfo[x][y][1] == 1:
+            reward += -50
+            self.state = old_state
+
         done = self.state == self.goal
         if done:
             reward += 1000
         else:
             goal_x, goal_y = self.goal
             reward += - (abs(goal_x - x) + abs(goal_y - y))
-        return self.state, reward, done
+        self.mapinfo[old_state[0]][old_state[1]][0] = 0
+        self.mapinfo[self.state[0]][self.state[1]][0] = 1
+        return np.transpose(self.mapinfo, (2, 0, 1)), reward, done
+
+    def fill_static_map_info(self):
+        self.mapinfo[5][3][1] = 1
+        self.mapinfo[5][4][1] = 1
+        self.mapinfo[5][5][1] = 1
+        self.mapinfo[5][6][1] = 1
+        self.mapinfo[5][7][1] = 1
+        self.mapinfo[5][8][1] = 1
+
+    def __get_zeros(self, pos, view_distance):
+        x, y = pos
+        x_start, y_start = max(x - view_distance, 0), max(y - view_distance, 0)
+        x_end, y_end = min(x + view_distance, self.grid_width - 1), min(y + view_distance, self.grid_height - 1)
+        return self.mapinfo[x_start:(x_end + 1), y_start:(y_end + 1)]
+
+
+class TestSysEnv(unittest.TestCase):
+    def test_np(self):
+        self.mapinfo = np.zeros((10, 10, 1))
+        x_start, y_start = 0, 0
+        x_end, y_end = 2, 2
+        sub_map = self.mapinfo[x_start:x_end, y_start:y_end]
+        print(sub_map)
+
+    def test_fill_enery(self):
+        map_size = 10
+        start_energy = 100
+        start_pos = (5, 5)
+        features = 5
+        # 使用NumPy的广播特性计算能量值
+        x, y, z = np.ogrid[:map_size, :map_size, :features]
+        energy_levels_np = start_energy - (abs(x - start_pos[0]) + abs(y - start_pos[1]))
+        print(energy_levels_np)
+
+
+class TestDqnTensor(unittest.TestCase):
+    def test_input(self):
+        env = SysEnv(21, 21)
+        env.fill_static_map_info()
+        env_tensor = torch.tensor(np.transpose(env.mapinfo, (2, 0, 1)), dtype=torch.float)
+        pos_tensor = torch.tensor([env.state], dtype=torch.float)
+        print(env_tensor.shape, pos_tensor.shape)
+        print(pos_tensor)
 
 
 def train_dqn(epochs=1000):
@@ -240,17 +328,17 @@ def train_dqn(epochs=1000):
         device = torch.device("cuda") if torch.cuda.is_available() else torch.device("cpu")
 
     replay_buffer = ReplayBuffer(2000)
-    state_dim = 2
-    action_dim = 4
-    hidden_dim = 64
+    input_shapes = (2, 21, 21)  # C，W，H 格式
+    action_dim = 4  # 4个动作
+    hidden_dim = 512  # 隐藏层个数
     lr = 0.001
     gamma = 0.95
     epsilon = 0.9
     epsilon_decay = 0.995
     target_update = 10
-    agent = DQN(state_dim, hidden_dim, action_dim, lr, gamma, epsilon, epsilon_decay, target_update, device,
+    agent = DQN(input_shapes, hidden_dim, action_dim, lr, gamma, epsilon, epsilon_decay, target_update, device,
                 DqnType.VANILLA_DQN)
-    env = SysEnv(10, 10)
+    env = SysEnv(21, 21)
     rewards = []
     for e in range(epochs):
         state = env.reset()
@@ -294,7 +382,7 @@ def usc_dqn():
     else:
         device = torch.device("cuda") if torch.cuda.is_available() else torch.device("cpu")
 
-    state_dim = 2
+    input_shape = (1, 21, 21)
     action_dim = 4
     hidden_dim = 64
     lr = 0.001
@@ -302,9 +390,9 @@ def usc_dqn():
     epsilon = 0.9
     epsilon_decay = 0.995
     target_update = 10
-    agent = DQN(state_dim, hidden_dim, action_dim, lr, gamma, epsilon, epsilon_decay, target_update, device,
+    agent = DQN(input_shape, hidden_dim, action_dim, lr, gamma, epsilon, epsilon_decay, target_update, device,
                 DqnType.VANILLA_DQN, True)
-    env = SysEnv(10, 10)
+    env = SysEnv(21, 21)
     state = env.reset()
     done = False
     while not done:

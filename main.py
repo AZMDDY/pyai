@@ -110,6 +110,13 @@ class TPlay(Play):
 
 
 if __name__ == '__main__':
+    # 配置日志系统
+    logging.basicConfig(
+        level=logging.DEBUG,  # 设置日志级别
+        format='%(asctime)s - %(levelname)s - %(message)s '
+               '[in %(filename)s:%(lineno)d(%(funcName)s)]',  # 设置日志格式
+        datefmt='%Y-%m-%d %H:%M:%S'  # 设置时间格式
+    )
     # unittest.main()
     # p = TPlay("dqn", 500, 500, 40, 40, 10, 10)
     # p.run()
@@ -120,10 +127,10 @@ if __name__ == '__main__':
     else:
         device = torch.device("cuda") if torch.cuda.is_available() else torch.device("cpu")
 
-    # rewards = dqn.train_dqn(1000)
-    # plt.plot(rewards)
-    # plt.xlabel('Episode')
-    # plt.ylabel('Total Reward')
-    # plt.title('Total Reward Over Episodes')
-    # plt.show()
+    rewards = dqn.train_dqn(1000)
+    plt.plot(rewards)
+    plt.xlabel('Episode')
+    plt.ylabel('Total Reward')
+    plt.title('Total Reward Over Episodes')
+    plt.show()
     dqn.usc_dqn()
