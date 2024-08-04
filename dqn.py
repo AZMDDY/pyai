@@ -9,7 +9,7 @@ import collections
 import torch
 import torch.nn as nn
 import torch.nn.functional as F
-import unittest
+import matplotlib.pyplot as plt
 
 
 class ReplayBuffer:
@@ -28,46 +28,6 @@ class ReplayBuffer:
 
     def size(self):  # 目前buffer中数据的数量
         return len(self.buffer)
-
-
-class TestReplayBuffer(unittest.TestCase):
-    def test_sample(self):
-        state = [1]
-        # state = np.array(state, dtype=np.float32)
-        next_state = [2]
-        # next_state = np.array(next_state, dtype=np.float32)
-        r = ReplayBuffer(10)
-        r.add(state, action=0, reward=0, next_state=next_state, done=0)
-        r.add(next_state, action=1, reward=1, next_state=state, done=1)
-        b_s, b_a, b_r, b_ns, b_d = r.sample(2)
-        transition_dict = {
-            'states': b_s,
-            'actions': b_a,
-            'next_states': b_ns,
-            'rewards': b_r,
-            'dones': b_d
-        }
-        states = torch.tensor(transition_dict['states'], dtype=torch.float)
-        actions = torch.tensor(transition_dict['actions']).view(-1, 1)
-        rewards = torch.tensor(transition_dict['rewards'], dtype=torch.float).view(-1, 1)
-        next_states = torch.tensor(transition_dict['next_states'], dtype=torch.float)
-        dones = torch.tensor(transition_dict['dones'], dtype=torch.float).view(-1, 1)
-        print(states, actions, rewards, next_states, dones)
-
-    def test_array(self):
-        state = (0, 0)
-        state = np.array(state, dtype=np.float32)
-        print(state)
-        state = np.array(state, dtype=np.float32)
-        print(state)
-
-    def test_tensor(self):
-        state = (0, 0)
-        print(torch.tensor(state, dtype=torch.float))
-        state = np.array(state, dtype=np.float32)
-        print(torch.tensor(state, dtype=torch.float))
-        input_tensor = torch.randn(2, 5, dtype=torch.float)
-        print(input_tensor)
 
 
 class Qnet(torch.nn.Module):
@@ -301,7 +261,7 @@ class SysEnv:
             reward += - (abs(goal_x - x) + abs(goal_y - y))
         self.mapinfo[old_state[0]][old_state[1]][0] = 0
         self.mapinfo[self.state[0]][self.state[1]][0] = 1
-        logging.error("pos {}, action: {}".format(self.state, action))
+        # logging.error("pos {}, action: {}".format(self.state, action))
         return np.transpose(self.mapinfo, (2, 0, 1)), reward, done
 
     def fill_static_map_info(self):
@@ -318,25 +278,6 @@ class SysEnv:
         x_start, y_start = max(x - view_distance, 0), max(y - view_distance, 0)
         x_end, y_end = min(x + view_distance, self.grid_width - 1), min(y + view_distance, self.grid_height - 1)
         return self.mapinfo[x_start:(x_end + 1), y_start:(y_end + 1)]
-
-
-class TestSysEnv(unittest.TestCase):
-    def test_np(self):
-        env = SysEnv(10, 10)
-        logging.error(env.step(0))
-        logging.error(env.step(2))
-        logging.error(env.step(3))
-        logging.error(env.step(4))
-
-
-class TestDqnTensor(unittest.TestCase):
-    def test_input(self):
-        env = SysEnv(21, 21)
-        env.fill_static_map_info()
-        env_tensor = torch.tensor(np.transpose(env.mapinfo, (2, 0, 1)), dtype=torch.float)
-        pos_tensor = torch.tensor([env.state], dtype=torch.float)
-        print(env_tensor.shape, pos_tensor.shape)
-        print(pos_tensor)
 
 
 def train_dqn(epochs=100000):
@@ -424,3 +365,21 @@ def usc_dqn():
         next_state, reward, done = env.step(action)
         state = next_state
         # logging.error("pos {}, action: {}".format(state, action))
+
+
+if __name__ == '__main__':
+    # 配置日志系统
+    logging.basicConfig(
+        level=logging.DEBUG,  # 设置日志级别
+        format='%(asctime)s - %(levelname)s - %(message)s '
+               '[in %(filename)s:%(lineno)d(%(funcName)s)]',  # 设置日志格式
+        datefmt='%Y-%m-%d %H:%M:%S'  # 设置时间格式
+    )
+
+    rewards = train_dqn(10000)
+    plt.plot(rewards)
+    plt.xlabel('Episode')
+    plt.ylabel('Total Reward')
+    plt.title('Total Reward Over Episodes')
+    plt.show()
+    # usc_dqn()

@@ -121,16 +121,10 @@ if __name__ == '__main__':
     # p = TPlay("dqn", 500, 500, 40, 40, 10, 10)
     # p.run()
 
-    system_name = platform.system()
-    if system_name == "Darwin":
-        device = torch.device("mps") if torch.backends.mps.is_available() else torch.device("cpu")
-    else:
-        device = torch.device("cuda") if torch.cuda.is_available() else torch.device("cpu")
-
-    # rewards = dqn.train_dqn(10000)
-    # plt.plot(rewards)
-    # plt.xlabel('Episode')
-    # plt.ylabel('Total Reward')
-    # plt.title('Total Reward Over Episodes')
-    # plt.show()
-    dqn.usc_dqn()
+    rewards = dqn.train_dqn(10000)
+    plt.plot(rewards)
+    plt.xlabel('Episode')
+    plt.ylabel('Total Reward')
+    plt.title('Total Reward Over Episodes')
+    plt.show()
+    #dqn.usc_dqn()
