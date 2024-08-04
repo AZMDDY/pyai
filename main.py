@@ -127,10 +127,10 @@ if __name__ == '__main__':
     else:
         device = torch.device("cuda") if torch.cuda.is_available() else torch.device("cpu")
 
-    rewards = dqn.train_dqn(1000)
-    plt.plot(rewards)
-    plt.xlabel('Episode')
-    plt.ylabel('Total Reward')
-    plt.title('Total Reward Over Episodes')
-    plt.show()
+    # rewards = dqn.train_dqn(10000)
+    # plt.plot(rewards)
+    # plt.xlabel('Episode')
+    # plt.ylabel('Total Reward')
+    # plt.title('Total Reward Over Episodes')
+    # plt.show()
     dqn.usc_dqn()
